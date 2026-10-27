@@ -596,6 +596,73 @@ jobs:
           open(p, 'w').write(s)
           PY
 
+      - name: 修正 6.12.58 task_mmu 错位块
+        if: inputs.susfs_enable
+        run: |
+          cd kernel_workspace/common
+          python3 - <<'PY'
+          p = 'fs/proc/task_mmu.c'
+          s = open(p).read()
+          A = (
+              "#ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+              "\tif (vma->vm_file) {\n"
+              "\t\tif (SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))\n"
+              "\t\t\treturn 0;\n"
+              "\t}\n"
+              "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+          )
+          B = (
+              "#ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+              "\t\tif (vma->vm_file && SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))\n"
+              "\t\t\tgoto bypass_orig_flow;\n"
+              "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+          )
+          L = (
+              "#ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+              "bypass_orig_flow:\n"
+              "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+          )
+          def remove_outside(text, block, start, end):
+              out = []
+              pos = 0
+              while True:
+                  i = text.find(block, pos)
+                  if i < 0:
+                      out.append(text[pos:])
+                      break
+                  out.append(text[pos:i])
+                  if start <= i < end:
+                      out.append(block)
+                  pos = i + len(block)
+              return "".join(out)
+          show_start = s.find("static int show_smap")
+          show_end = s.find("\nstatic ", show_start + 10)
+          roll_start = s.find("static int show_smaps_rollup")
+          roll_end = s.find("\nstatic ", roll_start + 10)
+          s = remove_outside(s, A, show_start, show_end)
+          s = remove_outside(s, B, roll_start, roll_end)
+          enum_start = s.find("enum clear_refs_types")
+          enum_end = s.find("};", enum_start)
+          s = s[:enum_start] + s[enum_start:enum_end].replace(L, "") + s[enum_end:]
+          show_start = s.find("static int show_smap")
+          show_end = s.find("\nstatic ", show_start + 10)
+          if s.find(A, show_start, show_end) == -1:
+              m = s.find("struct mem_size_stats mss = {};", show_start, show_end)
+              nl = s.find("\n", m) + 1
+              s = s[:nl] + A + s[nl:]
+          roll_start = s.find("static int show_smaps_rollup")
+          roll_end = s.find("\nstatic ", roll_start + 10)
+          if s.find(B, roll_start, roll_end) == -1:
+              do = s.find("do {", roll_start, roll_end)
+              g = s.find("smap_gather_stats(vma, &mss, 0);", do, roll_end)
+              s = s[:g] + B + s[g:]
+          if s.find(L, roll_start, roll_end) == -1:
+              g = s.find("smap_gather_stats(vma, &mss, 0);", roll_start, roll_end)
+              last = s.find("last_vma_end = vma->vm_end;", g, roll_end)
+              s = s[:last] + L + s[last:]
+          open(p, 'w').write(s)
+          PY
+
       - name: 构建内核
         run: |
           WORKDIR="$(pwd)"
