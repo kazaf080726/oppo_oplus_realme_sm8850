@@ -580,6 +580,36 @@ jobs:
           ccache -C || true
           ccache -z || true
           du -sh "$CCACHE_DIR" 2>/dev/null || true
+      - name: 修正 6.12 task_mmu SUSFS 块位置
+        if: inputs.susfs_enable
+        run: |
+          cd kernel_workspace/common
+          python3 - <<'PY'
+          p = 'fs/proc/task_mmu.c'
+          s = open(p).read()
+          block = (
+              "#ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+              "\tif (vma->vm_file) {\n"
+              "\t\tif (SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))\n"
+              "\t\t\treturn 0;\n"
+              "\t}\n"
+              "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+          )
+          wrong_start = s.find('static int smaps_rollup_open')
+          wrong_end = s.find('\nstatic ', wrong_start + 10)
+          idx = s.find(block)
+          if wrong_start < idx < wrong_end:
+              s = s[:idx] + s[idx+len(block):]
+          show = s.find('static int show_smap')
+          show_end = s.find('\nstatic ', show + 10)
+          if s.find(block, show, show_end) == -1:
+              m = s.find('struct vm_area_struct *vma = v;', show, show_end)
+              if m != -1:
+                  nl = s.find('\n', m) + 1
+                  s = s[:nl] + block + s[nl:]
+          open(p, 'w').write(s)
+          PY
+
       - name: 构建内核
         run: |
           WORKDIR="$(pwd)"
