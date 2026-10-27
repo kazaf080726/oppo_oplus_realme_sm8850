@@ -298,6 +298,32 @@ jobs:
             echo "已选择无内置KernelSU模式，跳过KernelSU配置..."
           fi
 
+      - name: 修复 SukiSU 6.12 LSM hook
+        if: inputs.ksu_type == 'sukisu'
+        run: |
+          cd kernel_workspace
+          python3 - <<'PY'
+          p = 'KernelSU/kernel/hook/lsm_hook.c'
+          s = open(p).read()
+          if 'ksu_lsmid' not in s:
+              old = '    security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), "ksu");'
+              new = (
+                  '#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)\n'
+                  '    static struct lsm_id ksu_lsmid = {\n'
+                  '        .name = "ksu",\n'
+                  '        .id = 0,\n'
+                  '    };\n'
+                  '    security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), &ksu_lsmid);\n'
+                  '#else\n'
+                  '    security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), "ksu");\n'
+                  '#endif'
+              )
+              if old not in s:
+                  raise SystemExit('LSM hook pattern not found')
+              s = s.replace(old, new, 1)
+              open(p, 'w').write(s)
+          PY
+
       - name: 应用 KernelSU & SUSFS 补丁
         if: inputs.susfs_enable
         run: |
