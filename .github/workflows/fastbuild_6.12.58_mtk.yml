@@ -272,7 +272,7 @@ jobs:
             echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
           elif [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
             echo "正在配置 SukiSU Ultra（官方仓库）..."
-            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
+            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
             echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%@cctv18"' >> ./common/arch/arm64/configs/gki_defconfig
             cd ./KernelSU
             KSU_VERSION=$(expr $(git rev-list --count main) + 30700 2>/dev/null || echo 114514)
@@ -305,29 +305,26 @@ jobs:
             echo "已选择无内置KernelSU模式，跳过KernelSU配置..."
           fi
 
-      - name: 修复 SukiSU 6.12 LSM hook
+      - name: 补齐 SukiSU main 的 SUSFS Kconfig
         if: inputs.ksu_type == 'sukisu'
         run: |
           cd kernel_workspace
+          if ! grep -q 'config KSU_SUSFS' common/drivers/kernelsu/Kconfig; then
+            echo 'bWVudSAiS2VybmVsU1UgLSBTVVNGUyIKY29uZmlnIEtTVV9TVVNGUwoJYm9vbCAiS2VybmVsU1UgYWRkb24gLSBTVVNGUyIKCWRlcGVuZHMgb24gS1NVCglkZXBlbmRzIG9uIFRIUkVBRF9JTkZPX0lOX1RBU0sKCWRlZmF1bHQgeQoKY29uZmlnIEtTVV9TVVNGU19TVVNfUEFUSAoJYm9vbCAiRW5hYmxlIHRvIGhpZGUgc3VzcGljaW91cyBwYXRoIgoJZGVwZW5kcyBvbiBLU1VfU1VTRlMKCWRlZmF1bHQgeQoKY29uZmlnIEtTVV9TVVNGU19TVVNfTU9VTlQKCWJvb2wgIkVuYWJsZSB0byBoaWRlIHN1c3BpY2lvdXMgbW91bnRzIgoJZGVwZW5kcyBvbiBLU1VfU1VTRlMKCWRlZmF1bHQgeQoKY29uZmlnIEtTVV9TVVNGU19TVVNfS1NUQVQKCWJvb2wgIkVuYWJsZSB0byBzcG9vZiBzdXNwaWNpb3VzIGtzdGF0IgoJZGVwZW5kcyBvbiBLU1VfU1VTRlMKCWRlZmF1bHQgeQoKY29uZmlnIEtTVV9TVVNGU19TUE9PRl9VTkFNRQoJYm9vbCAiRW5hYmxlIHRvIHNwb29mIHVuYW1lIgoJZGVwZW5kcyBvbiBLU1VfU1VTRlMKCWRlZmF1bHQgeQoKY29uZmlnIEtTVV9TVVNGU19FTkFCTEVfTE9HCglib29sICJFbmFibGUgbG9nZ2luZyBzdXNmcyBsb2cgdG8ga2VybmVsIgoJZGVwZW5kcyBvbiBLU1VfU1VTRlMKCWRlZmF1bHQgeQoKY29uZmlnIEtTVV9TVVNGU19ISURFX0tTVV9TVVNGU19TWU1CT0xTCglib29sICJFbmFibGUgdG8gYXV0b21hdGljYWxseSBoaWRlIGtzdSBhbmQgc3VzZnMgc3ltYm9scyBmcm9tIC9wcm9jL2thbGxzeW1zIgoJZGVwZW5kcyBvbiBLU1VfU1VTRlMKCWRlZmF1bHQgeQoKY29uZmlnIEtTVV9TVVNGU19TUE9PRl9DTURMSU5FX09SX0JPT1RDT05GSUcKCWJvb2wgIkVuYWJsZSB0byBzcG9vZiAvcHJvYy9ib290Y29uZmlnIG9yIC9wcm9jL2NtZGxpbmUiCglkZXBlbmRzIG9uIEtTVV9TVVNGUwoJZGVmYXVsdCB5Cgpjb25maWcgS1NVX1NVU0ZTX09QRU5fUkVESVJFQ1QKCWJvb2wgIkVuYWJsZSB0byByZWRpcmVjdCBhIHBhdGggdG8gYmUgb3BlbmVkIHdpdGggYW5vdGhlciBwYXRoIgoJZGVwZW5kcyBvbiBLU1VfU1VTRlMKCWRlZmF1bHQgeQoKY29uZmlnIEtTVV9TVVNGU19TVVNfTUFQCglib29sICJFbmFibGUgdG8gaGlkZSBzb21lIG1tYXBwZWQgcmVhbCBmaWxlIGZyb20gZGlmZmVyZW50IHByb2MgbWFwcyBpbnRlcmZhY2VzIgoJZGVwZW5kcyBvbiBLU1VfU1VTRlMKCWRlZmF1bHQgeQoKY29uZmlnIEtTVV9TVVNGU19QUklPUklUWV9VSURfRklMVEVSCglib29sICJFbmFibGUgdG8gaGlkZSB1c2VyLWRlZmluZWQgdWlkcyBmcm9tIGdldHByaW9yaXR5L3NldHByaW9yaXR5IgoJZGVwZW5kcyBvbiBLU1VfU1VTRlMKCWRlZmF1bHQgeQplbmRtZW51Cg==' | base64 -d >> common/drivers/kernelsu/Kconfig
+          fi
+          grep -n 'config KSU_SUSFS' common/drivers/kernelsu/Kconfig
+
+      - name: 固定 SukiSU Kbuild 源码目录
+        if: inputs.ksu_type == 'sukisu'
+        run: |
+          cd kernel_workspace
+          test -f common/drivers/kernelsu/Kbuild
           python3 - <<'PY'
-          p = 'KernelSU/kernel/hook/lsm_hook.c'
+          p = 'common/drivers/kernelsu/Kbuild'
           s = open(p).read()
-          if 'ksu_lsmid' not in s:
-              old = '    security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), "ksu");'
-              new = (
-                  '#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)\n'
-                  '    static struct lsm_id ksu_lsmid = {\n'
-                  '        .name = "ksu",\n'
-                  '        .id = 0,\n'
-                  '    };\n'
-                  '    security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), &ksu_lsmid);\n'
-                  '#else\n'
-                  '    security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), "ksu");\n'
-                  '#endif'
-              )
-              if old not in s:
-                  raise SystemExit('LSM hook pattern not found')
-              s = s.replace(old, new, 1)
+          line = 'KSU_KERNEL_DIR := $(abspath $(srctree)/drivers/kernelsu)\n'
+          if line not in s:
+              s = line + s
               open(p, 'w').write(s)
           PY
 
@@ -809,6 +806,7 @@ jobs:
           sudo rm -rf /opt/ghc &
           sudo rm -rf /opt/hostedtoolcache/CodeQL &
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="clang" LD="ld.lld" OBJCOPY="llvm-objcopy" O=out gki_defconfig &&
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- O=out INSTALL_HDR_PATH="$(pwd)/out/usr" headers_install &&
           export CC="$(pwd)/cc-wrapper" && export LD="$(pwd)/ld-wrapper" &&
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" OBJCOPY="llvm-objcopy" O=out KCFLAGS+=-DCONFIG_KSU_SUSFS_PRIORITY_UID_FILTER Image
           
