@@ -260,7 +260,7 @@ jobs:
         run: |
           # 进入内核工作目录
           cd kernel_workspace
-          if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" || ${{ github.event.inputs.ksu_type }} == "bakasu" ]]; then
+          if [[ ${{ github.event.inputs.ksu_type }} == "bakasu" ]]; then
             echo "正在配置BakaSU（由于SukiSU长期未维护无法正常编译，且BakaSU兼容sukisu管理器，故SukiSU源码仓库已重定向为bakasu）..."
             curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/refs/heads/main/kernel/setup.sh" | bash -s main
             echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%@cctv18"' >> ./common/arch/arm64/configs/gki_defconfig
@@ -268,6 +268,14 @@ jobs:
             # 生成自定义版本号（基于提交计数）, 失败时使用 114514
             KSU_VERSION=$(expr $(git rev-list --count main) + 30700 2>/dev/null || echo 114514)
             # 存储版本号到 GitHub 环境变量
+            echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+            echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
+          elif [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
+            echo "正在配置 SukiSU Ultra（官方仓库）..."
+            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
+            echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%@cctv18"' >> ./common/arch/arm64/configs/gki_defconfig
+            cd ./KernelSU
+            KSU_VERSION=$(expr $(git rev-list --count main) + 30700 2>/dev/null || echo 114514)
             echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
             echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
@@ -297,13 +305,43 @@ jobs:
             echo "已选择无内置KernelSU模式，跳过KernelSU配置..."
           fi
 
+      - name: 修复 SukiSU 6.12 LSM hook
+        if: inputs.ksu_type == 'sukisu'
+        run: |
+          cd kernel_workspace
+          python3 - <<'PY'
+          p = 'KernelSU/kernel/hook/lsm_hook.c'
+          s = open(p).read()
+          if 'ksu_lsmid' not in s:
+              old = '    security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), "ksu");'
+              new = (
+                  '#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)\n'
+                  '    static struct lsm_id ksu_lsmid = {\n'
+                  '        .name = "ksu",\n'
+                  '        .id = 0,\n'
+                  '    };\n'
+                  '    security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), &ksu_lsmid);\n'
+                  '#else\n'
+                  '    security_add_hooks(ksu_hooks, ARRAY_SIZE(ksu_hooks), "ksu");\n'
+                  '#endif'
+              )
+              if old not in s:
+                  raise SystemExit('LSM hook pattern not found')
+              s = s.replace(old, new, 1)
+              open(p, 'w').write(s)
+          PY
+
       - name: 应用 KernelSU & SUSFS 补丁
         if: inputs.susfs_enable
         run: |
           cd kernel_workspace
           if [[ ${{ github.event.inputs.ksu_type }} != "none" ]]; then
             echo "正在添加susfs补丁..."
-            git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}
+            if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
+              git clone --depth=1 https://github.com/midori01/susfs4ksu.git susfs4ksu -b gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}-dev
+            else
+              git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}
+            fi
             cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch ./common/
             cp ./susfs4ksu/kernel_patches/fs/* ./common/fs/
             cp ./susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
@@ -573,6 +611,75 @@ jobs:
           wget -q --tries=3 "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME/.github/scripts/setup_nomount_latest.sh" -O /tmp/setup_nomount_latest.sh
           bash /tmp/setup_nomount_latest.sh "$GITHUB_WORKSPACE/kernel_workspace"
 
+      - name: 修正 task_mmu SUSFS 块位置
+        if: inputs.susfs_enable
+        run: |
+          cd kernel_workspace/common
+          python3 - <<'PY'
+          p = 'fs/proc/task_mmu.c'
+          s = open(p).read()
+          A = (
+              "#ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+              "\tif (vma->vm_file) {\n"
+              "\t\tif (SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))\n"
+              "\t\t\treturn 0;\n"
+              "\t}\n"
+              "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+          )
+          B = (
+              "#ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+              "\t\tif (vma->vm_file && SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))\n"
+              "\t\t\tgoto bypass_orig_flow;\n"
+              "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+          )
+          L = (
+              "#ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+              "bypass_orig_flow:\n"
+              "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+          )
+          def remove_outside(text, block, start, end):
+              out = []
+              pos = 0
+              while True:
+                  i = text.find(block, pos)
+                  if i < 0:
+                      out.append(text[pos:])
+                      break
+                  out.append(text[pos:i])
+                  if start <= i < end:
+                      out.append(block)
+                  pos = i + len(block)
+              return "".join(out)
+          show_start = s.find("static int show_smap")
+          show_end = s.find("\nstatic ", show_start + 10)
+          roll_start = s.find("static int show_smaps_rollup")
+          roll_end = s.find("\nstatic ", roll_start + 10)
+          s = remove_outside(s, A, show_start, show_end)
+          s = remove_outside(s, B, roll_start, roll_end)
+          show_start = s.find("static int show_smap")
+          show_end = s.find("\nstatic ", show_start + 10)
+          if s.find(A, show_start, show_end) == -1:
+              m = s.find("struct mem_size_stats mss = {};", show_start, show_end)
+              if m != -1:
+                  nl = s.find("\n", m) + 1
+                  s = s[:nl] + A + s[nl:]
+          roll_start = s.find("static int show_smaps_rollup")
+          roll_end = s.find("\nstatic ", roll_start + 10)
+          if s.find(B, roll_start, roll_end) == -1:
+              do = s.find("do {", roll_start, roll_end)
+              g = s.find("smap_gather_stats(vma, &mss, 0);", do, roll_end)
+              if g != -1:
+                  s = s[:g] + B + s[g:]
+          roll_start = s.find("static int show_smaps_rollup")
+          roll_end = s.find("\nstatic ", roll_start + 10)
+          if s.find(L, roll_start, roll_end) == -1:
+              g = s.find("smap_gather_stats(vma, &mss, 0);", roll_start, roll_end)
+              last = s.find("last_vma_end = vma->vm_end;", g, roll_end)
+              if last != -1:
+                  s = s[:last] + L + s[last:]
+          open(p, 'w').write(s)
+          PY
+
       - name: 构建内核
         run: |
           WORKDIR="$(pwd)"
@@ -683,8 +790,9 @@ jobs:
           sudo rm -rf /opt/ghc &
           sudo rm -rf /opt/hostedtoolcache/CodeQL &
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="clang" LD="ld.lld" OBJCOPY="llvm-objcopy" O=out gki_defconfig &&
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- O=out INSTALL_HDR_PATH="$(pwd)/out/usr" headers_install &&
           export CC="$(pwd)/cc-wrapper" && export LD="$(pwd)/ld-wrapper" &&
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" OBJCOPY="llvm-objcopy" O=out Image
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" OBJCOPY="llvm-objcopy" O=out KCFLAGS+=-DCONFIG_KSU_SUSFS_PRIORITY_UID_FILTER Image
           
           # 编译后时间劫持二次校验
           echo "--- 编译后环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
