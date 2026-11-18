@@ -331,6 +331,17 @@ jobs:
               open(p, 'w').write(s)
           PY
 
+      - name: 修复 SukiSU preinit 源码路径
+        if: inputs.ksu_type == 'sukisu'
+        run: |
+          cd kernel_workspace
+          if [ -L common/drivers/kernelsu ]; then
+            target=$(readlink -f common/drivers/kernelsu)
+            rm common/drivers/kernelsu
+            cp -a "$target" common/drivers/kernelsu
+          fi
+          test -f common/drivers/kernelsu/preinit/runner/runner.c
+
       - name: 应用 KernelSU & SUSFS 补丁
         if: inputs.susfs_enable
         run: |
