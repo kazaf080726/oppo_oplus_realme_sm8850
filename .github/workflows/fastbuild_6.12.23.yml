@@ -691,6 +691,19 @@ jobs:
           open(p, 'w').write(s)
           PY
 
+      - name: 固定 SukiSU Kbuild 源码目录
+        if: inputs.ksu_type == 'sukisu'
+        run: |
+          cd kernel_workspace
+          python3 - <<'PY'
+          p = 'common/drivers/kernelsu/Kbuild'
+          s = open(p).read()
+          line = 'KSU_KERNEL_DIR := $(abspath $(srctree)/drivers/kernelsu)\n'
+          if line not in s:
+              s = line + s
+              open(p, 'w').write(s)
+          PY
+
       - name: 构建内核
         run: |
           WORKDIR="$(pwd)"
