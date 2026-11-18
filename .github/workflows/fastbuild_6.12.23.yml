@@ -335,12 +335,14 @@ jobs:
         if: inputs.ksu_type == 'sukisu'
         run: |
           cd kernel_workspace
-          if [ -L common/drivers/kernelsu ]; then
-            target=$(readlink -f common/drivers/kernelsu)
-            rm common/drivers/kernelsu
-            cp -a "$target" common/drivers/kernelsu
+          if [ -L common/drivers/kernelsu ] || [ -d common/drivers/kernelsu ]; then
+            rm -rf common/drivers/kernelsu
           fi
+          mkdir -p common/drivers/kernelsu
+          cp -a KernelSU/kernel/. common/drivers/kernelsu/
+          test -f common/drivers/kernelsu/Kbuild
           test -f common/drivers/kernelsu/preinit/runner/runner.c
+          ls -la common/drivers/kernelsu | head -n 15
 
       - name: 应用 KernelSU & SUSFS 补丁
         if: inputs.susfs_enable
