@@ -331,18 +331,20 @@ jobs:
               open(p, 'w').write(s)
           PY
 
-      - name: 修复 SukiSU preinit 源码路径
+      - name: 固定 SukiSU Kbuild 源码目录
         if: inputs.ksu_type == 'sukisu'
         run: |
           cd kernel_workspace
-          if [ -L common/drivers/kernelsu ] || [ -d common/drivers/kernelsu ]; then
-            rm -rf common/drivers/kernelsu
-          fi
-          mkdir -p common/drivers/kernelsu
-          cp -a KernelSU/kernel/. common/drivers/kernelsu/
           test -f common/drivers/kernelsu/Kbuild
-          test -f common/drivers/kernelsu/preinit/runner/runner.c
-          ls -la common/drivers/kernelsu | head -n 15
+          python3 - <<'PY'
+          p = 'common/drivers/kernelsu/Kbuild'
+          s = open(p).read()
+          line = 'KSU_KERNEL_DIR := $(abspath $(srctree)/drivers/kernelsu)\n'
+          if line not in s:
+              s = line + s
+              open(p, 'w').write(s)
+          PY
+          head -n 4 common/drivers/kernelsu/Kbuild
 
       - name: 应用 KernelSU & SUSFS 补丁
         if: inputs.susfs_enable
@@ -691,19 +693,6 @@ jobs:
               if last != -1:
                   s = s[:last] + L + s[last:]
           open(p, 'w').write(s)
-          PY
-
-      - name: 固定 SukiSU Kbuild 源码目录
-        if: inputs.ksu_type == 'sukisu'
-        run: |
-          cd kernel_workspace
-          python3 - <<'PY'
-          p = 'common/drivers/kernelsu/Kbuild'
-          s = open(p).read()
-          line = 'KSU_KERNEL_DIR := $(abspath $(srctree)/drivers/kernelsu)\n'
-          if line not in s:
-              s = line + s
-              open(p, 'w').write(s)
           PY
 
       - name: 构建内核
